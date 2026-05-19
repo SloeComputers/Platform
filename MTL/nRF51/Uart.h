@@ -12,6 +12,9 @@ namespace MTL {
 
 namespace nRF51 {
 
+constexpr uint32_t UART_BAUD_9600   = 0x00275000;
+constexpr uint32_t UART_BAUD_115200 = 0x01D7E000;
+
 union UartReg
 {
    // Tasks
@@ -45,45 +48,36 @@ union UartReg
    REG(0x56c, config);
 };
 
-
-template <unsigned PSELRXD,
-          unsigned PSELTXD=0xFFFFFFFF,   // Default disconnected
-          unsigned PSELCTS=0xFFFFFFFF,   // Default disconnected
-          unsigned PSELRTS=0xFFFFFFFF>   // Default disconnected
+template <unsigned PSEL_RXD,
+          unsigned PSEL_TXD=0xFFFFFFFF, // Default disconnected
+          unsigned PSEL_CTS=0xFFFFFFFF, // Default disconnected
+          unsigned PSEL_RTS=0xFFFFFFFF> // Default disconnected
 class Uart : public Periph<UartReg,0x40002000>
 {
-private:
-   MTL::Gpio::In<1,PSELRXD>  rxd;
-   MTL::Gpio::Out<1,PSELTXD> txd;
-   MTL::Gpio::In<1,PSELCTS>  cts;
-   MTL::Gpio::Out<1,PSELRTS> rts;
-
 public:
    // TODO calc baudrate constant from an actual frequency
    //      formulae is baud-rate * (1<<32) / 16000000
    //      round to nearest 0x1000
-   Uart(uint32_t baud = 0x275000, bool parity = false)  // 9600 no-parity
+   Uart(uint32_t baud = UART_BAUD_9600, bool parity = false)  // 9600 no-parity
    {
-      reg->pselrxd  = PSELRXD;
-      reg->pseltxd  = PSELTXD;
-      reg->pselcts  = PSELCTS;
-      reg->pselrts  = PSELRTS;
+      reg->pselrxd = PSEL_RXD;
+      reg->pseltxd = PSEL_TXD;
+      reg->pselcts = PSEL_CTS;
+      reg->pselrts = PSEL_RTS;
 
       reg->baudrate = baud;
 
-      bool hwctl = (PSELCTS != 0xFFFFFFFF) && (PSELRTS != 0xFFFFFFFF);
+      bool hwctl = (PSEL_CTS != 0xFFFFFFFF) || (PSEL_RTS != 0xFFFFFFFF);
 
-      reg->config   = ((hwctl  ? 1 : 0)<<0) |
-                      ((parity ? 7 : 0)<<1);
+      reg->config = ((parity ? 0b111 : 0b000) << 1) | ((hwctl ? 1 : 0) << 0);
+      reg->enable = 4;
 
-      reg->enable   = 0x4;
-
-      if (PSELRXD != 0xFFFFFFFF)
+      if (PSEL_RXD != 0xFFFFFFFF)
       {
          reg->startrx = 1;
       }
 
-      if (PSELTXD != 0xFFFFFFFF)
+      if (PSEL_TXD != 0xFFFFFFFF)
       {
          reg->starttx = 1;
       }
@@ -99,16 +93,18 @@ public:
       return reg->txrdy == 0;
    }
 
-   uint8_t recv() const
+   void tx(uint8_t data)
+   {
+      reg->txrdy = 0;
+      reg->txd   = data;
+
+      while(reg->txrdy == 0);
+   }
+
+   uint8_t rx() const
    {
       reg->rxrdy = 0;
       return reg->rxd;
-   }
-
-   void send(uint8_t data)
-   {
-      reg->txrdy = 0;
-      reg->txd = data;
    }
 
    uint8_t getError() const
@@ -117,6 +113,12 @@ public:
       reg->errorsrc = 0xF;
       return src;
    }
+
+private:
+   MTL::Gpio::In<1,PSEL_RXD>  rxd;
+   MTL::Gpio::Out<1,PSEL_TXD> txd;
+   MTL::Gpio::In<1,PSEL_CTS>  cts;
+   MTL::Gpio::Out<1,PSEL_RTS> rts;
 };
 
 } // namespace nRF51
